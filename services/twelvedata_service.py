@@ -3,7 +3,6 @@ import requests
 from datetime import datetime, timedelta
 from config import TD_API_KEYS
 import itertools
-import io
 
 class TwelveDataService:
     def __init__(self):
@@ -11,53 +10,44 @@ class TwelveDataService:
         self.current_api_key = next(self.api_keys)
         self.last_rotation_time = datetime.now()
 
-    def _rotate_api_key(self):
-        """Rotate the API key every 6 hours."""
-        if datetime.now() - self.last_rotation_time > timedelta(hours=6):
+    def _rotate_api_key(self, force=False):
+        """Rotate the API key every 6 hours or if forced."""
+        if force or (datetime.now() - self.last_rotation_time > timedelta(hours=6)):
+            old_key = self.current_api_key
             self.current_api_key = next(self.api_keys)
             self.last_rotation_time = datetime.now()
+            print(f"[TwelveData] Rotated API key: {old_key[:4]}**** -> {self.current_api_key[:4]}****")
 
     @staticmethod
     def normalize_symbol(symbol: str) -> str:
-        """
-        Convert user input into TwelveData format:
-        Examples:
-            eurusd  -> EUR/USD
-            EURUSD  -> EUR/USD
-            eur/usd -> EUR/USD
-        """
-        cleaned = symbol.replace("/", "").upper()  # Remove slash, uppercase
+        cleaned = symbol.replace("/", "").upper()
         if len(cleaned) == 6:
             return f"{cleaned[0:3]}/{cleaned[3:6]}"
         else:
             raise ValueError(f"Invalid currency pair format: {symbol}")
 
     def get_price(self, symbol: str):
-        """
-        Fetch the real-time price for a given currency pair.
-        """
         self._rotate_api_key()
         normalized_symbol = self.normalize_symbol(symbol)
 
         url = "https://api.twelvedata.com/price"
-        params = {
-            "symbol": normalized_symbol,
-            "apikey": self.current_api_key
-        }
+        params = {"symbol": normalized_symbol, "apikey": self.current_api_key}
 
         response = requests.get(url, params=params)
         data = response.json()
+
+        # Handle API limit error
+        if "code" in data and data["code"] == 429:
+            print("[TwelveData] Rate limit hit, rotating API key...")
+            self._rotate_api_key(force=True)
+            return self.get_price(symbol)  # Retry with new key
 
         if "price" in data:
             return float(data["price"])
         else:
             raise Exception(f"TwelveData API error: {data}")
-        
+
     def get_ohlc(self, symbol: str, interval: str, outputsize: int = 200):
-        """
-        Fetch OHLC data (candles) for the given symbol and interval.
-        Returns list of dicts with keys: datetime, open, high, low, close, volume.
-        """
         self._rotate_api_key()
         normalized_symbol = self.normalize_symbol(symbol)
 
@@ -73,9 +63,13 @@ class TwelveDataService:
         response = requests.get(url, params=params, timeout=10)
         data = response.json()
 
+        # Handle API limit error
+        if "code" in data and data["code"] == 429:
+            print("[TwelveData] Rate limit hit, rotating API key...")
+            self._rotate_api_key(force=True)
+            return self.get_ohlc(symbol, interval, outputsize)  # Retry with new key
+
         if "values" in data:
-            # values are in descending order (newest first), reverse them
             return list(reversed(data["values"]))
         else:
             raise Exception(f"TwelveData API error: {data.get('message', 'Unknown error')}")
-
