@@ -1,6 +1,8 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from config import DB_PATH
+from contextlib import contextmanager
+
 
 # SQLite connection string
 DATABASE_URL = f"sqlite:///{DB_PATH}"
@@ -18,3 +20,11 @@ def init_db():
     """Initialize the database and create all tables."""
     from models import user  # Import all models here
     Base.metadata.create_all(bind=engine)
+
+@contextmanager
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
