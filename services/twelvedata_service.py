@@ -3,6 +3,7 @@ import requests
 from datetime import datetime, timedelta
 from config import TD_API_KEYS
 import itertools
+import io
 
 class TwelveDataService:
     def __init__(self):
@@ -51,4 +52,30 @@ class TwelveDataService:
             return float(data["price"])
         else:
             raise Exception(f"TwelveData API error: {data}")
+        
+    def get_ohlc(self, symbol: str, interval: str, outputsize: int = 200):
+        """
+        Fetch OHLC data (candles) for the given symbol and interval.
+        Returns list of dicts with keys: datetime, open, high, low, close, volume.
+        """
+        self._rotate_api_key()
+        normalized_symbol = self.normalize_symbol(symbol)
+
+        url = "https://api.twelvedata.com/time_series"
+        params = {
+            "symbol": normalized_symbol,
+            "interval": interval,
+            "outputsize": outputsize,
+            "apikey": self.current_api_key,
+            "format": "JSON"
+        }
+
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+
+        if "values" in data:
+            # values are in descending order (newest first), reverse them
+            return list(reversed(data["values"]))
+        else:
+            raise Exception(f"TwelveData API error: {data.get('message', 'Unknown error')}")
 

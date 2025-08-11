@@ -1,7 +1,7 @@
 import logging
 from telegram.ext import Application
 from config import BOT_TOKEN, LOG_LEVEL
-from handlers import start, help, echo, price
+from handlers import start, help, echo, price, chart
 from services.db_service import init_db
 
 # Setup logging
@@ -23,6 +23,7 @@ def main():
     application.add_handler(help.handler)
     application.add_handler(echo.handler)
     application.add_handler(price.handler)
+    application.add_handler(chart.handler)
 
     # Start polling
     logger.info("Bot is starting...")
