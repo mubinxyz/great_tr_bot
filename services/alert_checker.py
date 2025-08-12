@@ -1,3 +1,5 @@
+# services/alert_checker.py
+import asyncio
 from services.alert_service import get_pending_alerts, mark_alert_triggered
 from services.chart_service import generate_chart_image
 from services.twelvedata_service import TwelveDataService
@@ -37,10 +39,17 @@ async def check_alerts_job(context):
                     )
                 )
 
-                # Send charts for all timeframes in alert
+                # Send charts for all timeframes in alert (run blocking generator in executor)
                 for tf in alert.timeframes.split(","):
                     try:
-                        buf, interval_norm = generate_chart_image(alert.symbol, tf)
+                        loop = asyncio.get_running_loop()
+                        buf, interval_norm = await loop.run_in_executor(
+                            None,
+                            generate_chart_image,
+                            alert.symbol,
+                            tf,
+                            alert.target_price
+                        )
                         await context.bot.send_photo(
                             chat_id=chat_id,
                             photo=buf,
@@ -54,5 +63,5 @@ async def check_alerts_job(context):
                         )
 
         except Exception as e:
-            # log error somewhere
+            # log error somewhere (console for now)
             print(f"[AlertChecker] Error checking alert {alert.id}: {e}")

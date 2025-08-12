@@ -4,8 +4,7 @@ from telegram.ext import CommandHandler
 from telegram import Update
 from services.chart_service import normalize_interval, generate_chart_image
 
-# tweakable small delay between chart requests to avoid bursts
-INTER_CHART_DELAY = 0.25  # seconds
+INTER_CHART_DELAY = 0.25  # seconds between charts to be polite to API
 
 async def chart_command(update: Update, context):
     """
@@ -53,7 +52,11 @@ async def chart_command(update: Update, context):
             try:
                 # generate_chart_image is blocking -> run in threadpool
                 buf, interval_norm = await loop.run_in_executor(
-                    None, generate_chart_image, symbol, tf, None
+                    None,
+                    generate_chart_image,
+                    symbol,
+                    tf,
+                    None
                 )
 
                 await update.message.reply_photo(
@@ -63,7 +66,6 @@ async def chart_command(update: Update, context):
                 )
 
             except Exception as e:
-                # per-chart error (keeps other charts running)
                 await update.message.reply_text(f"⚠️ Failed to generate chart for {symbol} {tf}: {e}")
 
             await asyncio.sleep(INTER_CHART_DELAY)

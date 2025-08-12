@@ -1,3 +1,5 @@
+# handlers/alert.py
+import asyncio
 from telegram.ext import CommandHandler
 from services.user_service import get_or_create_user
 from services.alert_service import create_alert
@@ -57,15 +59,25 @@ async def alert_command(update, context):
         f"on {alert.timeframes}\nAlert ID: {alert.id}"
     )
 
-    # Immediately send current charts
+    # Immediately send current charts (non-blocking)
+    loop = asyncio.get_running_loop()
     for tf in normalized_tfs:
         try:
-            buf, interval_norm = generate_chart_image(symbol, tf)
+            # Run the blocking chart generator in a thread
+            buf, interval_norm = await loop.run_in_executor(
+                None,
+                generate_chart_image,
+                symbol,
+                tf,
+                alert.target_price  # pass alert price to draw horizontal line
+            )
+
             await update.message.reply_photo(
                 photo=buf,
                 filename=f"{symbol}_{interval_norm}.png",
-                caption=f"⏱ Timeframe: {interval_norm}, Symbol: {symbol}"
+                caption=f"⏱ Timeframe: {interval_norm}, Symbol: {symbol.upper()}"
             )
+
         except Exception as e:
             await update.message.reply_text(f"⚠️ Could not generate chart for {symbol} {tf}: {e}")
 

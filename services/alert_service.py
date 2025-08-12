@@ -1,4 +1,5 @@
 # services/alert_service.py
+
 from datetime import datetime
 from models.alert import Alert, AlertDirection
 from services.db_service import get_db

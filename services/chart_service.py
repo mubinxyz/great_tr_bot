@@ -1,11 +1,19 @@
 # services/chart_service.py
+import matplotlib
+matplotlib.use("Agg")   # must come before mplfinance/pyplot imports
+
 import io
+from io import BytesIO
+import numpy as np
 import pandas as pd
 import mplfinance as mpf
-from services.twelvedata_service import TwelveDataService
+import matplotlib.pyplot as plt
 from datetime import time
+from services.twelvedata_service import TwelveDataService
 
 td_service = TwelveDataService()
+
+DEFAULT_OUTPUTSIZE = 200  # keep same default as you used elsewhere
 
 def normalize_interval(tf: str) -> str:
     tf = tf.lower().strip()
@@ -34,37 +42,114 @@ def normalize_interval(tf: str) -> str:
 
     raise ValueError(f"Invalid timeframe: {tf}")
 
-def generate_chart_image(symbol: str, interval: str, alert_price: float = None):
+def generate_chart_image(symbol: str, interval: str, alert_price: float = None, outputsize: int = None):
     """
     Returns: (buf: BytesIO, interval_norm: str)
-    """
-    interval_norm = normalize_interval(interval)
-    candles = td_service.get_ohlc(symbol, interval_norm, outputsize=200)
 
+    Uses mpf.make_addplot for horizontal alert line and 'alines' param
+    for vertical day separators (first bar of each day). Very similar to
+    the working snippet your friend used.
+    """
+    if outputsize is None:
+        outputsize = DEFAULT_OUTPUTSIZE * 2  # follow friend's 'double' heuristic
+
+    interval_norm = normalize_interval(interval)
+
+    # fetch candles
+    candles = td_service.get_ohlc(symbol, interval_norm, outputsize=outputsize)
     df = pd.DataFrame(candles)
+    if df.empty:
+        raise ValueError("No OHLC data returned")
+
+    # ensure index and types
     df['datetime'] = pd.to_datetime(df['datetime'])
     df.set_index('datetime', inplace=True)
+    df.sort_index(inplace=True)
 
     for col in ['open', 'high', 'low', 'close']:
-        df[col] = pd.to_numeric(df[col])
+        df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    # Vertical day separators (midnight timestamps)
-    vlines = [ts for ts in df.index if ts.time() == time(0, 0)]
+    # Prepare addplot for alert horizontal line (aligned Series)
+    add_plots = []
+    if alert_price is not None:
+        alert_price = float(alert_price)
+        # create a Series indexed like df so mpf lines align with x-axis
+        alert_series = pd.Series([alert_price] * len(df), index=df.index)
+        add_plots.append(
+            mpf.make_addplot(
+                alert_series,
+                type='line',
+                panel=0,
+                color='red',        # red alert line for contrast
+                linestyle='--',
+                width=1.2,
+                alpha=0.9
+            )
+        )
 
-    buf = io.BytesIO()
+    # --- compute day-first timestamps (first available bar for each calendar day) ---
+    day_firsts_series = df.index.to_series().groupby(df.index.date).first()
+
+    # Robust conversion to python datetimes (use np.array to keep old behavior)
+    if hasattr(day_firsts_series, "dt"):
+        day_firsts = list(np.array(day_firsts_series.dt.to_pydatetime()))
+    else:
+        day_firsts = [pd.Timestamp(x).to_pydatetime() for x in day_firsts_series]
+
+    # Bound check: keep only day_firsts that fall within the df index range (inclusive)
+    idx_min = df.index[0]
+    idx_max = df.index[-1]
+    day_firsts = [d for d in day_firsts if d >= idx_min and d <= idx_max]
+
+    # If there are day-firsts, create vertical line segments from ymin to ymax at each day start
+    alines_dict = None
+    if day_firsts:
+        y_min = float(df['low'].min())
+        y_max = float(df['high'].max())
+
+        # include alert_price in span so vlines cover entire visible range
+        if alert_price is not None:
+            y_min = min(y_min, alert_price)
+            y_max = max(y_max, alert_price)
+
+        vertical_lines = [
+            ((pd.Timestamp(day).to_pydatetime(), y_min), (pd.Timestamp(day).to_pydatetime(), y_max))
+            for day in day_firsts
+        ]
+        alines_dict = dict(
+            alines=vertical_lines,
+            colors=['#1f77b4'] * len(vertical_lines),
+            linestyle=[':'] * len(vertical_lines),
+            linewidths=[0.9] * len(vertical_lines),
+            alpha=0.9
+        )
+
+    # Plot with mplfinance (use 'data' key, not passing df as positional)
+    buf = BytesIO()
 
     plot_kwargs = dict(
+        data=df,
         type='candle',
-        style='yahoo',
-        figsize=(16, 9),
-        tight_layout=True,
-        vlines=dict(vlines=vlines, linewidths=1.5, alpha=0.8, linestyle=':'),
-        hlines=dict(hlines=[alert_price] if alert_price is not None else [], colors=['red'], linestyle='-'),
-        savefig=dict(fname=buf, dpi=100)
+        style='charles',
+        addplot=add_plots if add_plots else None,
+        volume=False,
+        figratio=(16, 9),
+        figscale=1.15,
+        savefig=dict(fname=buf, dpi=150, bbox_inches='tight'),
     )
 
-    # mpf.plot expects df as first positional arg
-    mpf.plot(df, **plot_kwargs)
+    if alines_dict:
+        plot_kwargs['alines'] = alines_dict
+
+    # Remove addplot if it's empty to avoid validator complaining
+    if plot_kwargs.get('addplot') is None:
+        plot_kwargs.pop('addplot')
+
+    # Call mplfinance plot (this will write image into our BytesIO via savefig)
+    mpf.plot(**plot_kwargs)
+
+    # close matplotlib figures
+    plt.close('all')
 
     buf.seek(0)
     return buf, interval_norm
