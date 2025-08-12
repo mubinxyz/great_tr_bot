@@ -60,8 +60,14 @@ def generate_chart_image(symbol: str, interval: str, alert_price: float = None, 
     df['datetime'] = pd.to_datetime(df['datetime'])
     df.set_index('datetime', inplace=True)
     df.sort_index(inplace=True)
+
+    # Convert OHLC to numeric
     for col in ['open', 'high', 'low', 'close']:
         df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    # Drop volume if present
+    if 'volume' in df.columns:
+        df.drop(columns=['volume'], inplace=True)
 
     # prepare addplot (horizontal alert line) as Series aligned to df.index
     add_plots = []

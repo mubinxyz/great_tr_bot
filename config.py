@@ -27,9 +27,11 @@ TD_API_KEYS = [
 ]
 TD_API_KEYS = [key for key in TD_API_KEYS if key]
 
+# For Backtest and Strategy Alerts
 TD_STRATEGY_API_KEYS = [
     os.getenv('TD_STRATEGY_API_KEY_1')
 ]
+TD_STRATEGY_API_KEYS = [key for key in TD_STRATEGY_API_KEYS if key]
 
 # ===== Validations =====
 if not BOT_TOKEN:
