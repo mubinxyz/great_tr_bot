@@ -1,150 +1,255 @@
+# backtest.py
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import (
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+)
 import importlib.util
 import os
+import traceback
 from config import TD_STRATEGY_API_KEYS
-from services.strategy_data_service import fetch_ohlcv_data
 from backtesting import Backtest
+from services.strategy_twelvedata_service import StrategyTwelveDataService
+import pandas as pd
+from backtesting import Strategy as BacktestingStrategy  # for discovery
 
-# --- Step 1: /backtest ---
+
+def normalize_symbol_for_td(sym: str) -> str:
+    s = sym.strip().upper()
+    if len(s) == 6 and s.isalpha():
+        return s[:3] + "/" + s[3:]
+    return s
+
+
 async def backtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("📈 Trend-following", callback_data="bt_cat:trend_following")],
-        [InlineKeyboardButton("💹 Mean-reversion (soon)", callback_data="bt_cat:mean_reversion")],
-        [InlineKeyboardButton("📊 SMC (soon)", callback_data="bt_cat:smc")],
-        [InlineKeyboardButton("📦 Volume (soon)", callback_data="bt_cat:volume")]
     ]
-    await update.message.reply_text(
-        "Choose backtest category:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Choose backtest category:", reply_markup=reply_markup)
 
-# --- Step 2: Category chosen ---
+
 async def bt_category_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    category = query.data.split(":")[1]
-
-    if category == "trend_following":
+    cat = query.data.split(":", 1)[1]
+    if cat == "trend_following":
         keyboard = [
-            [InlineKeyboardButton("MA Crossover", callback_data="bt_strat:ma_crossover")],
-            [InlineKeyboardButton("2MA+MACD", callback_data="bt_strat:2_ma_macd")],
-            [InlineKeyboardButton("3MA_2_OF_THEM_CROSS", callback_data="bt_strat:3_ma_2_of_them_cross")],
+            [InlineKeyboardButton("MA crossover — Basic", callback_data="bt_strat:ma_basic")],
         ]
-        await query.edit_message_text("Choose trend-following strategy:",
-            reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_text("Trend-following strategies:", reply_markup=InlineKeyboardMarkup(keyboard))
     else:
-        await query.edit_message_text("🚧 This category is coming soon!")
+        await query.edit_message_text("This category has no strategies implemented yet.")
 
-# --- Step 3: Strategy chosen ---
+
 async def bt_strategy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    strategy = query.data.split(":")[1]
-
-    if strategy == "ma_crossover":
+    strat = query.data.split(":", 1)[1]
+    if strat == "ma_basic":
         keyboard = [
-            [InlineKeyboardButton("Basic", callback_data="bt_ma:ma_basic_c")],
-            [InlineKeyboardButton("Session-based", callback_data="bt_ma:ma_session_c")],
-            [InlineKeyboardButton("ATR-based SL/TP", callback_data="bt_ma:ma_atr_c")],
-            [InlineKeyboardButton("% Stop Loss", callback_data="bt_ma:ma_percent_c")]
+            [InlineKeyboardButton("MA Basic — params (text)", callback_data="bt_ma:basic_params")],
         ]
-        await query.edit_message_text("Choose MA crossover variant:",
-            reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_text(
+            "MA Crossover — Basic.\nChoose how to input parameters:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
     else:
-        await query.edit_message_text("🚧 This strategy is coming soon!")
+        await query.edit_message_text("Strategy not implemented.")
 
-# --- Step 4: Variant chosen ---
+
 async def bt_ma_variant_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    variant = query.data.split(":")[1]
-    context.user_data["bt_variant"] = variant
-
-    if variant == "ma_basic_c":
-        text = (
-            f"Selected: {variant.replace('_', ' ').title()}\n\n"
-            "Now reply with:\n"
-            "`SYMBOL FAST_MA,SLOW_MA MA_TYPE TIMEFRAME`\n"
-            "Example: `EURUSD 10,20 ema 1h`"
+    variant = query.data.split(":", 1)[1]
+    if variant == "basic_params":
+        context.user_data["bt_waiting"] = "ma_basic"
+        msg = (
+            "Send parameters as text in one of these forms:\n\n"
+            "1) SYMBOL FAST,SLOW MA_TYPE TIMEFRAME\n"
+            "   e.g. `EURUSD 10,50 ssma 1h`\n\n"
+            "2) SYMBOL FAST SLOW MA_TYPE TIMEFRAME\n"
+            "   e.g. `EUR/USD 10 50 ema 4h`\n\n"
+            "Accepted MA_TYPE: ssma | sma | ema\n"
+            "Accepted TIMEFRAME examples: 1min 5min 15min 1h 4h 1day\n\n"
+            "I will run a quick backtest and return the stats."
         )
+        await query.edit_message_text(msg)
     else:
-        text = (
-            f"Selected: {variant.replace('_', ' ').title()}\n\n"
-            "coming soon"
-        )
+        await query.edit_message_text("Variant not implemented.")
 
-    await query.edit_message_text(text, parse_mode="Markdown")
 
-# --- Step 5: Run backtest ---
 async def bt_ma_params_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text.strip()
-    variant = context.user_data.get("bt_variant")
-
-    if not variant:
-        await update.message.reply_text("⚠️ Please select a strategy variant first.")
+    if context.user_data.get("bt_waiting") != "ma_basic":
         return
 
-    if variant == "ma_basic_c":
-        # Expecting: SYMBOL FAST_MA,SLOW_MA MA_TYPE TIMEFRAME
-        # Example: EURUSD 10,20 ema 1h
-        parts = user_text.split()
-        if len(parts) != 4:
-            await update.message.reply_text(
-                "⚠️ Wrong format! Please reply exactly like:\n"
-                "`SYMBOL FAST_MA,SLOW_MA MA_TYPE TIMEFRAME`\n"
-                "Example: `EURUSD 10,20 ema 1h`",
-                parse_mode="Markdown"
-            )
-            return
+    text = update.message.text or ""
+    wait_msg = await update.message.reply_text("⏳ Running backtest — parsing parameters...")
 
-        symbol = parts[0].upper()
-        ma_pair = parts[1].split(",")
-        if len(ma_pair) != 2 or not all(x.isdigit() for x in ma_pair):
-            await update.message.reply_text("⚠️ FAST_MA and SLOW_MA must be two integers separated by a comma, e.g. 10,20")
-            return
-        fast_ma, slow_ma = map(int, ma_pair)
-        ma_type = parts[2].lower()
-        timeframe = parts[3].lower()
+    parts = text.strip().split()
+    try:
+        symbol = None
+        fast_ma = None
+        slow_ma = None
+        ma_type = "ssma"
+        timeframe = "1h"
 
-        valid_ma_types = ["ma", "ema", "ssma"]  # add more if you want
-        if ma_type not in valid_ma_types:
-            await update.message.reply_text(
-                f"⚠️ Invalid MA_TYPE. Choose one of: {', '.join(valid_ma_types)}"
-            )
-            return
+        if len(parts) >= 1:
+            symbol = parts[0]
+        if len(parts) >= 2 and "," in parts[1]:
+            nums = parts[1].split(",")
+            fast_ma = int(nums[0])
+            slow_ma = int(nums[1])
+            if len(parts) >= 3:
+                ma_type = parts[2].lower()
+            if len(parts) >= 4:
+                timeframe = parts[3].lower()
+        elif len(parts) >= 4:
+            fast_ma = int(parts[1])
+            slow_ma = int(parts[2])
+            ma_type = parts[3].lower()
+            if len(parts) >= 5:
+                timeframe = parts[4].lower()
+        else:
+            if len(parts) == 3:
+                symbol = parts[0]
+                fast_ma = int(parts[1])
+                slow_ma = int(parts[2])
+                ma_type = "ssma"
+            else:
+                raise ValueError("Could not parse parameters from input.")
 
-        # Store parsed params for next step
-        context.user_data["bt_params"] = {
-            "symbol": symbol,
-            "fast_ma": fast_ma,
-            "slow_ma": slow_ma,
-            "ma_type": ma_type,
-            "timeframe": timeframe,
-        }
+        if ma_type not in ("sma", "ema", "ssma"):
+            raise ValueError("ma_type must be 'sma', 'ema', or 'ssma'.")
 
-        await update.message.reply_text(
-            f"✅ Parameters received:\n"
-            f"Symbol: {symbol}\n"
-            f"Fast MA: {fast_ma}\n"
-            f"Slow MA: {slow_ma}\n"
-            f"MA Type: {ma_type}\n"
-            f"Timeframe: {timeframe}\n\n"
-            "Now running backtest..."
+        td_symbol = normalize_symbol_for_td(symbol)
+    except Exception as e:
+        await wait_msg.edit_text(f"❌ Parameter parse error: {e}\n\nPlease follow the format described earlier.")
+        context.user_data.pop("bt_waiting", None)
+        return
+
+    try:
+        svc = StrategyTwelveDataService()
+    except Exception as e:
+        await wait_msg.edit_text(f"❌ Strategy service not configured: {e}")
+        context.user_data.pop("bt_waiting", None)
+        return
+
+    try:
+        raw = svc.get_ohlc(td_symbol, timeframe, outputsize=500)
+    except Exception as e:
+        await wait_msg.edit_text(f"❌ Failed to fetch OHLC for {td_symbol}: {e}")
+        context.user_data.pop("bt_waiting", None)
+        return
+
+    try:
+        df = pd.DataFrame(raw)
+        df.rename(
+            columns={
+                "datetime": "Date",
+                "open": "Open",
+                "high": "High",
+                "low": "Low",
+                "close": "Close",
+                "volume": "Volume",
+            },
+            inplace=True,
         )
+        for col in ("Open", "High", "Low", "Close", "Volume"):
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        df["Date"] = pd.to_datetime(df["Date"])
+        df.set_index("Date", inplace=True)
+        df.sort_index(inplace=True)
+        if len(df) < max(fast_ma, slow_ma) + 5:
+            await wait_msg.edit_text(
+                f"❌ Not enough data points for short={fast_ma}, long={slow_ma}. Only {len(df)} rows fetched."
+            )
+            context.user_data.pop("bt_waiting", None)
+            return
+    except Exception as e:
+        await wait_msg.edit_text(f"❌ Error preparing OHLC DataFrame: {e}")
+        context.user_data.pop("bt_waiting", None)
+        return
 
-        # Here you can call the backtest function with those params or schedule it
-        # For example:
-        # stats, plot_path = await run_ma_basic_c_backtest(context.user_data["bt_params"])
-        # await update.message.reply_photo(photo=open(plot_path, 'rb'), caption=f"Backtest stats:\n{stats}")
+    base_dir = os.path.dirname(__file__)
+    candidates = [
+        os.path.join(base_dir, "strategies", "trend_following", "ma_crossover", "ma_basic_c.py"),
+        os.path.join(base_dir, "ma_basic_c.py"),
+        os.path.join(os.getcwd(), "strategies", "trend_following", "ma_crossover", "ma_basic_c.py"),
+        os.path.join(os.getcwd(), "ma_basic_c.py"),
+    ]
 
-    else:
-        await update.message.reply_text("⚠️ This variant is not yet implemented.")
+    module = None
+    last_import_error = None
+    for path in candidates:
+        if not os.path.exists(path):
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location("ma_basic_c", path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            break
+        except Exception as e:
+            last_import_error = e
+            module = None
 
-# --- Register ---
+    if module is None:
+        msg = f"❌ Could not import strategy module. Tried paths:\n" + "\n".join(candidates)
+        if last_import_error:
+            msg += f"\n\nLast import error: {last_import_error}"
+        await wait_msg.edit_text(msg)
+        context.user_data.pop("bt_waiting", None)
+        return
+
+    StrategyClass = None
+    for obj in module.__dict__.values():
+        if isinstance(obj, type) and issubclass(obj, BacktestingStrategy) and obj is not BacktestingStrategy:
+            StrategyClass = obj
+            break
+
+    if StrategyClass is None:
+        await wait_msg.edit_text("❌ No Strategy subclass found in the imported strategy module.")
+        context.user_data.pop("bt_waiting", None)
+        return
+
+    strategy_kwargs = {
+        "short_ma_length": fast_ma,
+        "long_ma_length": slow_ma,
+        "ma_type": ma_type,
+    }
+
+    # --- IMPORTANT CHANGE: don't pass strategy_kwargs to Backtest.__init__ ---
+    try:
+        bt = Backtest(df, StrategyClass, cash=1000, commission=0.003)
+        # pass strategy kwargs to .run(...) — the Backtest.run() forwards them to the Strategy
+        stats = bt.run(**strategy_kwargs)
+    except Exception as e:
+        tb = traceback.format_exc()
+        await wait_msg.edit_text(f"❌ Backtest execution error:\n{e}\n\nTraceback:\n{tb[:1500]}")
+        context.user_data.pop("bt_waiting", None)
+        return
+
+    try:
+        stats_text = "✅ Backtest finished — summary:\n\n"
+        stats_df = getattr(stats, "_asdict", None)
+        if callable(stats_df):
+            stats_text += str(stats._asdict())
+        else:
+            stats_text += str(stats)
+        await wait_msg.edit_text(stats_text)
+    except Exception:
+        await wait_msg.edit_text("✅ Backtest finished — stats available. (Could not format nicely.)")
+
+    context.user_data.pop("bt_waiting", None)
+
+
 def register_backtest_handlers(app):
     app.add_handler(CommandHandler("backtest", backtest_command))
     app.add_handler(CallbackQueryHandler(bt_category_callback, pattern=r"^bt_cat:.+"))
     app.add_handler(CallbackQueryHandler(bt_strategy_callback, pattern=r"^bt_strat:.+"))
     app.add_handler(CallbackQueryHandler(bt_ma_variant_callback, pattern=r"^bt_ma:.+"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bt_params_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bt_ma_params_received))
