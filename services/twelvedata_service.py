@@ -49,12 +49,19 @@ class TwelveDataService:
 
     @staticmethod
     def normalize_symbol(symbol: str) -> str:
-        """Normalize to TwelveData format."""
-        cleaned = symbol.replace("/", "").upper()
-        if len(cleaned) == 6:
-            return f"{cleaned[0:3]}/{cleaned[3:6]}"
-        else:
-            raise ValueError(f"Invalid currency pair format: {symbol}")
+        """Normalize to TwelveData format for forex, stocks, and commodities."""
+        s = symbol.strip().upper()
+
+        # Already in correct format (has /)
+        if "/" in s:
+            return s
+
+        # Forex pairs without slash, e.g., EURUSD -> EUR/USD
+        if len(s) == 6 and s.isalpha():
+            return f"{s[0:3]}/{s[3:6]}"
+
+        # Stocks, commodities, indices — return as is
+        return s
 
     def get_price(self, symbol: str):
         """Fetch real-time price."""
