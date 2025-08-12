@@ -27,6 +27,10 @@ TD_API_KEYS = [
 ]
 TD_API_KEYS = [key for key in TD_API_KEYS if key]
 
+TD_STRATEGY_API_KEYS = [
+    os.getenv('TD_STRATEGY_API_KEY_1')
+]
+
 # ===== Validations =====
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN is missing in .env file!")
