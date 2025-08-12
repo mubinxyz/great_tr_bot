@@ -18,7 +18,12 @@ TD_API_KEYS = [
     os.getenv("TD_API_KEY_1"),
     os.getenv("TD_API_KEY_2"),
     os.getenv("TD_API_KEY_3"),
-    os.getenv("TD_API_KEY_4")
+    os.getenv("TD_API_KEY_4"),
+    os.getenv("TD_API_KEY_5"),
+    os.getenv("TD_API_KEY_6"),
+    os.getenv("TD_API_KEY_7"),
+    os.getenv("TD_API_KEY_8"),
+    
 ]
 TD_API_KEYS = [key for key in TD_API_KEYS if key]
 
