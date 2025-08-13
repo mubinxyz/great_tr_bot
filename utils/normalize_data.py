@@ -5,54 +5,75 @@ import pandas as pd
 
 def normalize_symbol(symbol: str) -> str:
     """
-    Normalize a trading symbol by stripping spaces and converting to uppercase.
+    Normalize trading symbol for API requests.
+    - Removes spaces and slashes
+    - Converts to uppercase
 
     Args:
-        symbol (str): The trading symbol, e.g., ' eurusd ', 'BTC-USD'.
+        symbol (str): raw symbol like "eurusd", "EUR/USD", "eur usd"
 
     Returns:
-        str: Normalized symbol in uppercase, e.g., 'EURUSD', 'BTC-USD'.
+        str: normalized symbol (e.g., "EURUSD")
     """
     if not symbol:
         return ""
-    return symbol.strip().upper()
+    return symbol.replace(" ", "").replace("/", "").upper()
 
-
-def normalize_ohlc(content: list) -> pd.DataFrame:
+def normalize_timeframe(tf) -> str:
     """
-    Normalize LiteFinance-style OHLC data into a pandas DataFrame.
+    Normalize timeframe to LiteFinance/TwelveData format.
 
-    LiteFinance API format:
-        [
-            [timestamp_ms, open, high, low, close],
-            ...
-        ]
+    LiteFinance accepts:
+        1, 5, 15, 30, 60, 240, D, W, M
 
     Args:
-        content (list): List of OHLC rows from LiteFinance.
+        tf: timeframe as int or string (e.g. 15, "15m", "daily", "D")
 
     Returns:
-        pd.DataFrame: Columns = ['datetime', 'open', 'high', 'low', 'close']
+        str: normalized timeframe code
     """
-    if not content or not isinstance(content, list):
-        raise ValueError("Invalid OHLC data: must be a non-empty list.")
+    tf_map = {
+        "1": "1", "1m": "1", 1: "1",
+        "5": "5", "5m": "5", 5: "5",
+        "15": "15", "15m": "15", 15: "15",
+        "30": "30", "30m": "30", 30: "30",
+        "60": "60", "1h": "60", 60: "60",
+        "240": "240", "4h": "240", 240: "240",
+        "D": "D", "1d": "D", "daily": "D", "day": "D",
+        "W": "W", "1w": "W", "weekly": "W", "week": "W",
+        "M": "M", "1mo": "M", "monthly": "M", "month": "M"
+    }
 
-    df = pd.DataFrame(content, columns=["timestamp_ms", "open", "high", "low", "close"])
+    key = str(tf).lower()
+    return tf_map.get(key, "15")  # default to 15 min
 
-    # Convert timestamp to datetime (UTC)
-    df["datetime"] = pd.to_datetime(df["timestamp_ms"], unit="ms", utc=True)
 
-    # Drop original timestamp column
-    df.drop(columns=["timestamp_ms"], inplace=True)
+def normalize_ohlc(ohlc_data: dict) -> pd.DataFrame:
+    """
+    Normalize OHLC data into a Pandas DataFrame.
+    Handles missing volume gracefully.
 
-    # Ensure numeric conversion
-    for col in ["open", "high", "low", "close"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+    Args:
+        ohlc_data (dict): Dictionary containing keys 'o', 'h', 'l', 'c', optionally 'v' and 't'.
 
-    # Drop rows with NaN values
-    df.dropna(inplace=True)
+    Returns:
+        pd.DataFrame: DataFrame with columns ['datetime', 'open', 'high', 'low', 'close', 'volume' (if available)].
+    """
+    if not ohlc_data:
+        return pd.DataFrame()
 
-    # Sort chronologically
+    df = pd.DataFrame({
+        "datetime": pd.to_datetime(ohlc_data.get("t", []), unit="s", utc=True),
+        "open": pd.to_numeric(ohlc_data.get("o", []), errors="coerce"),
+        "high": pd.to_numeric(ohlc_data.get("h", []), errors="coerce"),
+        "low": pd.to_numeric(ohlc_data.get("l", []), errors="coerce"),
+        "close": pd.to_numeric(ohlc_data.get("c", []), errors="coerce"),
+    })
+
+    # Add volume if present
+    if "v" in ohlc_data:
+        df["volume"] = pd.to_numeric(ohlc_data.get("v", []), errors="coerce")
+
     df.sort_values("datetime", inplace=True)
     df.reset_index(drop=True, inplace=True)
 
