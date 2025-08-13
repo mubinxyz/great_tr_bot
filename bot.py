@@ -3,7 +3,7 @@ from telegram.ext import Application
 from config import BOT_TOKEN, LOG_LEVEL
 from handlers import start, help, price, chart, alert
 from services.db_service import init_db
-from services.alert_checker import check_alerts_job
+from utils.alert_checker import check_alerts_job
 from handlers.listalerts import list_alerts_handler, delete_alert_handler
 from handlers.backtest import register_backtest_handlers
 

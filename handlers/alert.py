@@ -3,7 +3,7 @@ import asyncio
 from telegram.ext import CommandHandler
 from services.user_service import get_or_create_user
 from services.alert_service import create_alert
-from services.chart_service import normalize_interval, generate_chart_image
+from utils.chart_utils import normalize_interval, generate_chart_image
 
 async def alert_command(update, context):
     """

@@ -2,7 +2,7 @@
 import asyncio
 from telegram.ext import CommandHandler
 from telegram import Update
-from services.chart_service import normalize_interval, generate_chart_image
+from utils.chart_utils import generate_chart_image, normalize_interval
 
 INTER_CHART_DELAY = 0.25  # seconds between charts to be polite to API
 
@@ -51,18 +51,18 @@ async def chart_command(update: Update, context):
         for tf in normalized_tfs:
             try:
                 # generate_chart_image is blocking -> run in threadpool
-                buf, interval_norm = await loop.run_in_executor(
+                buf, interval_minutes = await loop.run_in_executor(
                     None,
                     generate_chart_image,
                     symbol,
                     tf,
-                    None
+                    None  # alert_price, optional
                 )
 
                 await update.message.reply_photo(
                     photo=buf,
-                    filename=f"{symbol}_{interval_norm}.png",
-                    caption=f"⏱ Timeframe: {interval_norm}, Symbol: {symbol.upper()}"
+                    filename=f"{symbol}_{interval_minutes}.png",
+                    caption=f"⏱ Timeframe: {interval_minutes} min, Symbol: {symbol.upper()}"
                 )
 
             except Exception as e:
