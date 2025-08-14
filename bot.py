@@ -1,6 +1,6 @@
 import logging
 from telegram.ext import Application
-from config import BOT_TOKEN, LOG_LEVEL
+from config import LOG_LEVEL, BOT_TOKEN
 from handlers import start, help, price, chart, alert
 from services.db_service import init_db
 from utils.alert_checker import check_alerts_job

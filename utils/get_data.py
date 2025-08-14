@@ -1,34 +1,13 @@
 # utils/get_data.py
 
 import requests
-import itertools
-from datetime import datetime, timedelta
-from config import TD_API_KEYS
+# import itertools
+# from datetime import datetime, timedelta
 import pandas as pd
 import time
 from utils.scrape_last_data import get_last_data
 from utils.normalize_data import normalize_symbol, normalize_timeframe, normalize_ohlc  
 import json
-
-# # --- API Key Management ---
-# _td_api_keys = itertools.cycle(TD_API_KEYS)
-# _current_api_key = next(_td_api_keys)
-# _last_rotation_time = datetime.now()
-
-
-# def _rotate_api_key():
-#     """Rotate API key every 6 hours."""
-#     global _current_api_key, _last_rotation_time
-#     if datetime.now() - _last_rotation_time > timedelta(hours=6):
-#         _force_rotate_api_key()
-
-
-# def _force_rotate_api_key():
-#     """Force rotation immediately."""
-#     global _current_api_key, _last_rotation_time
-#     _current_api_key = next(_td_api_keys)
-#     _last_rotation_time = datetime.now()
-#     print(f"[TwelveData] Rotated API key to: {_current_api_key}")
 
 
 def get_ohlc(symbol: str, timeframe: int = 15, from_date: int = None, to_date: int = time.time()) -> pd.DataFrame:

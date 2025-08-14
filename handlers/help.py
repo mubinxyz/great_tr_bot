@@ -5,53 +5,46 @@ from telegram.constants import ParseMode
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the /help command."""
     await update.message.reply_text(
-        "*📌 Available Commands:*\n\n"
-        
+        "*📌 Available Commands*\n\n"
+
         "*💬 General*\n"
-        "`/start` – Start the bot\n"
-        "`/help` – Show this help message\n\n"
-        
+        "`/start` — Start the bot\n"
+        "`/help` — Show this help message\n\n"
+
         "*💲 Price*\n"
-        "`/price <symbol>` – Get the current price\n"
+        "`/price <symbol>` — Get the current price (Price / BID / ASK)\n"
         "_Example_: `/price eurusd`\n\n"
-        
+
         "*📊 Charts*\n"
-        "`/chart <symbol> <interval>` – Show a candlestick chart\n"
-        "_Example_: `/chart eurusd 1h`\n\n"
-        
+        "`/chart <symbols> [timeframe=15] [outputsize=200] [from_date] [to_date]`\n"
+        "- `symbols` can be a single symbol or comma-separated (e.g. `EURUSD,GBPUSD`)\n"
+        "- `timeframe` accepts numbers or aliases: `1`, `5`, `15`, `60`, `1h`, `4h`, `D`, `W`, `M`.\n"
+        "- If you provide two dates (from & to) the bot will force the output size for that range.\n"
+        "_Examples:_\n"
+        "`/chart EURUSD`\n"
+        "`/chart EURUSD 60 300`\n"
+        "`/chart EURUSD 60 \"2024-08-01 14:30:00\" \"2025-01-01 14:30:00\"`\n\n"
+
         "*🚨 Alerts*\n"
-        "`/alert <price> <symbol> <interval>` – Set a price alert\n"
-        "_Example_: `/alert 1.0850 eurusd 1h,5m`\n"
-        "`/listalerts` – Show all your active alerts\n\n"
-        
-        "*🕒 Supported Intervals*\n"
-        "`1m`, `5m`, `15m`, `30m`, `1h`, `4h`, `1d`\n\n"
-        
-        "*💡 Tips:*\n"
-        "- Symbols can be `EURUSD` or `eur/usd`\n"
-        "- Charts show a horizontal line for your alert price\n"
-        "- Charts show vertical lines for separating days\n\n"
-        
-        "*🔁 /backtest – Run a trading strategy backtest*\n"
-        "You’ll be guided through selecting a category and entering parameters.\n\n"
-        
-        "*Parameter Formats:*\n"
-        "`SYMBOL FAST,SLOW MA_TYPE TIMEFRAME`\n"
-        "_Example_: `/backtest EURUSD 10,50 ssma 1h`\n\n"
-        "`SYMBOL FAST SLOW MA_TYPE TIMEFRAME`\n"
-        "_Example_: `/backtest eur/usd 10 50 ema 4h`\n\n"
-        
-        "*Notes:*\n"
-        "- `SYMBOL`: e.g. `EURUSD`, `eur/usd`\n"
-        "- `FAST`, `SLOW`: moving average periods\n"
-        "- `MA_TYPE`: `ssma` | `sma` | `ema`\n"
-        "- `TIMEFRAME`: `1min` | `5min` | `15min` | `1h` | `4h` | `1day`\n"
-        "- HTML report is auto-deleted after sending\n\n"
-        
-        "*Example Flow:*\n"
-        "1. `/backtest` → choose category → choose strategy\n"
-        "2. Send params like: `EURUSD 10,50 ema 1h`\n"
-        "3. Receive stats + performance chart",
+        "`/alert <symbol> <price> <timeframes>` — Create an alert and get immediate charts for the requested timeframes.\n"
+        "_Example_: `/alert eurusd 1.1234 4h,15m`\n"
+        "Notes:\n"
+        "- Charts with your alert price are sent immediately for each timeframe.\n"
+        "- If the alert condition is already met at creation, you may receive a note that it was already triggered.\n\n"
+
+        "*📭 Manage Alerts*\n"
+        "`/listalerts` — Show all your active alerts. Each alert message includes a ❌ Delete button to remove it.\n\n"
+
+        "*🕒 Supported time tokens (examples)*\n"
+        "`1m`, `5m`, `15m`, `30m`, `60` or `1h`, `4h`, `1d`, `D`, `W`, `M` — many aliases are accepted.\n\n"
+
+        "*📝 Quick tips*\n"
+        "- Symbols are case-insensitive: `eurusd`, `EUR/USD` both work.\n"
+        "- Wrap multi-word dates in quotes: `\"YYYY-MM-DD HH:MM:SS\"`.\n"
+        "- If a date range is provided, `outputsize` is auto-forced to cover that period.\n"
+        "- Use `/listalerts` to delete alerts via the inline buttons.\n\n"
+
+        "If you want a short example for any command, send the command here (for example: `/chart EURUSD 15`).",
         parse_mode=ParseMode.MARKDOWN
     )
 
