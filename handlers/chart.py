@@ -8,7 +8,7 @@ from services.chart_service import get_chart
 from utils.normalize_data import normalize_timeframe, to_unix_timestamp
 
 logger = logging.getLogger(__name__)
-INTER_CHART_DELAY = 0.15
+INTER_CHART_DELAY = 0.05
 DEFAULT_OUTPUTSIZE = 200
 DEFAULT_TIMEFRAME = "15"
 DATE_FORCED_OUTPUTSIZE = 9999

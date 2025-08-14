@@ -1,9 +1,8 @@
 # utils/get_data.py
 
 import requests
-import itertools
-from datetime import datetime, timedelta
-from config import TD_API_KEYS
+# import itertools
+# from datetime import datetime, timedelta
 import pandas as pd
 import time
 from utils.scrape_last_data import get_last_data
