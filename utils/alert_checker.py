@@ -1,12 +1,12 @@
 # utils/alert_checker.py
 import asyncio
 from utils.chart_utils import generate_chart_image
-from utils.get_data import DataService
+from utils.scrape_last_data import get_last_data
 from services.alert_service import get_pending_alerts, mark_alert_triggered
 from models.alert import AlertDirection
 
 # unified data service (used for price lookups and OHLC)
-data_service = DataService()
+
 
 
 def _extract_price(price_resp):
@@ -52,7 +52,7 @@ async def check_alerts_job(context):
     for alert in alerts:
         try:
             # get_price may return a dict or a plain number
-            price_resp = data_service.get_price(alert.symbol)
+            price_resp = get_last_data(alert.symbol)
             current_price = _extract_price(price_resp)
 
             if current_price is None:

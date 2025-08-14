@@ -1,6 +1,7 @@
 # utils/normalize_data.py
 
 import pandas as pd
+from datetime import datetime
 
 
 def normalize_symbol(symbol: str) -> str:
@@ -19,34 +20,53 @@ def normalize_symbol(symbol: str) -> str:
         return ""
     return symbol.replace(" ", "").replace("/", "").upper()
 
+
 def normalize_timeframe(tf) -> str:
     """
     Normalize timeframe to LiteFinance/TwelveData format.
 
-    LiteFinance accepts:
-        1, 5, 15, 30, 60, 240, D, W, M
+    LiteFinance accepts minute codes: "1", "5", "15", "30", "60", "240"
+    and period codes: "D", "W", "M".
 
-    Args:
-        tf: timeframe as int or string (e.g. 15, "15m", "daily", "D")
+    Accepts inputs like: 15, "15m", "1h", "daily", "D", "d", "1", 1, etc.
 
     Returns:
-        str: normalized timeframe code
+        str: normalized timeframe code (e.g. "15", "60", "D", "W", "M")
     """
+    if tf is None:
+        return "15"
+
+    key = str(tf).strip().lower()
+
     tf_map = {
-        "1": "1", "1m": "1", 1: "1",
-        "5": "5", "5m": "5", 5: "5",
-        "15": "15", "15m": "15", 15: "15",
-        "30": "30", "30m": "30", 30: "30",
-        "60": "60", "1h": "60", 60: "60",
-        "240": "240", "4h": "240", 240: "240",
-        "D": "D", "1d": "D", "daily": "D", "day": "D",
-        "W": "W", "1w": "W", "weekly": "W", "week": "W",
-        "M": "M", "1mo": "M", "monthly": "M", "month": "M"
+        # minutes
+        "1": "1", "1m": "1", "min": "1", "mins": "1",
+        "5": "5", "5m": "5",
+        "15": "15", "15m": "15",
+        "30": "30", "30m": "30",
+        "60": "60", "1h": "60", "h": "60",
+        "240": "240", "4h": "240",
+
+        # days / weeks / months -> return uppercase canonical values
+        "d": "D", "1d": "D", "daily": "D", "day": "D",
+        "w": "W", "1w": "W", "weekly": "W", "week": "W",
+        "m": "M", "1mo": "M", "monthly": "M", "month": "M",
     }
 
-    key = str(tf).lower()
-    return tf_map.get(key, "15")  # default to 15 min
+    # allow keys like "15min" or "15mn" by stripping common suffixes
+    if key.endswith("min") or key.endswith("mins") or key.endswith("mn"):
+        key = key.replace("mins", "").replace("min", "").replace("mn", "")
 
+    # allow keys like "15m", "1h" already handled above, but this helps integer-like strings
+    if key.isdigit():
+        # keep as-is if it's a recognized minute interval
+        if key in {"1", "5", "15", "30", "60", "240"}:
+            return key
+        # otherwise fallback to 15
+        return "15"
+
+    # lookup in map, default to 15 minutes
+    return tf_map.get(key, "15")
 
 def normalize_ohlc(ohlc_data: dict) -> pd.DataFrame:
     """
@@ -80,44 +100,83 @@ def normalize_ohlc(ohlc_data: dict) -> pd.DataFrame:
     return df
 
 
-import pandas as pd
-from datetime import datetime
 
-def to_unix_timestamp(time_input) -> int:
+def to_unix_timestamp(time_input) -> int | None:
     """
-    Convert almost any date/time input to a Unix timestamp (in seconds).
-    
+    Convert many date/time inputs to a Unix timestamp (seconds).
+    - Returns int(seconds) or None if input is None.
+
     Accepts:
-        - datetime object
-        - date string (many formats, e.g., "2024-08-01 14:30:00", "08/01/2024", "1 Aug 2024 2:30 PM")
-        - pandas Timestamp
-        - Unix timestamp in milliseconds or seconds
-        - ISO format strings
-        
-    Returns:
-        int: Unix timestamp in seconds
+      - datetime.datetime
+      - pandas.Timestamp
+      - int/float (seconds or milliseconds)
+      - strings in many formats, e.g.:
+          "2025-01-01", "2025-01-01 14:30:00", "2025-01-01,14:30:00",
+          "2025-01-01T14:30:00", ISO strings, "now"
+    Raises:
+      ValueError for unrecognized strings, TypeError for unsupported types.
     """
-    # If it's already a datetime object
+    if time_input is None:
+        return None
+
+    # datetime
     if isinstance(time_input, datetime):
         return int(time_input.timestamp())
-    
-    # If it's already a pandas Timestamp
+
+    # pandas Timestamp
     if isinstance(time_input, pd.Timestamp):
         return int(time_input.timestamp())
-    
-    # If it's a number (seconds or milliseconds)
+
+    # numbers (seconds or milliseconds)
     if isinstance(time_input, (int, float)):
-        # Detect milliseconds (larger than year 3000 in seconds)
-        if time_input > 1e12:  # milliseconds
-            return int(time_input / 1000)
-        return int(time_input)  # already seconds
-    
-    # Try parsing as a string
+        # avoid bool (subclass of int) confusion
+        if isinstance(time_input, bool):
+            raise TypeError(f"Unsupported type: {type(time_input)}")
+        val = float(time_input)
+        # heuristics: >1e12 -> milliseconds
+        if val > 1e12:
+            return int(val // 1000)
+        return int(val)
+
+    # strings
     if isinstance(time_input, str):
+        s = time_input.strip()
+        if not s:
+            raise ValueError("Empty date string")
+
+        lower = s.lower()
+        if lower in ("now", "current", "today"):
+            return int(_time.time())
+
+        # Accept comma-separated date/time like "2024-08-01,14:30:00"
+        # and ISO-like "2024-08-01T14:30:00"
+        cleaned = s.replace(",", " ").replace("T", " ").strip()
+
+        # Try pandas robust parser first (uses dateutil under the hood)
         try:
-            ts = pd.to_datetime(time_input, utc=True)
+            ts = pd.to_datetime(cleaned, utc=True)
+            if pd.isna(ts):
+                raise ValueError("parsed to NaT")
             return int(ts.timestamp())
         except Exception:
+            # Fallback: try several common strptime formats (local naive)
+            fmts = [
+                "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%d %H:%M",
+                "%Y-%m-%d",
+                "%d/%m/%Y %H:%M:%S",
+                "%d/%m/%Y",
+            ]
+            for fmt in fmts:
+                try:
+                    dt = datetime.strptime(cleaned, fmt)
+                    # treat as UTC (or naive local) -> convert to epoch seconds
+                    return int(dt.replace(tzinfo=None).timestamp())
+                except Exception:
+                    continue
+
+            # if still failing, raise so caller can report proper message
             raise ValueError(f"Unrecognized date/time format: {time_input}")
-    
+
+    # unsupported type
     raise TypeError(f"Unsupported type: {type(time_input)}")

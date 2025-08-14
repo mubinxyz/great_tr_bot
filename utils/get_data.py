@@ -7,27 +7,28 @@ from config import TD_API_KEYS
 import pandas as pd
 import time
 from utils.scrape_last_data import get_last_data
-from utils.normalize_data import normalize_symbol, normalize_timeframe, normalize_ohlc  # ✅ import here
+from utils.normalize_data import normalize_symbol, normalize_timeframe, normalize_ohlc  
+import json
 
-# --- API Key Management ---
-_td_api_keys = itertools.cycle(TD_API_KEYS)
-_current_api_key = next(_td_api_keys)
-_last_rotation_time = datetime.now()
-
-
-def _rotate_api_key():
-    """Rotate API key every 6 hours."""
-    global _current_api_key, _last_rotation_time
-    if datetime.now() - _last_rotation_time > timedelta(hours=6):
-        _force_rotate_api_key()
+# # --- API Key Management ---
+# _td_api_keys = itertools.cycle(TD_API_KEYS)
+# _current_api_key = next(_td_api_keys)
+# _last_rotation_time = datetime.now()
 
 
-def _force_rotate_api_key():
-    """Force rotation immediately."""
-    global _current_api_key, _last_rotation_time
-    _current_api_key = next(_td_api_keys)
-    _last_rotation_time = datetime.now()
-    print(f"[TwelveData] Rotated API key to: {_current_api_key}")
+# def _rotate_api_key():
+#     """Rotate API key every 6 hours."""
+#     global _current_api_key, _last_rotation_time
+#     if datetime.now() - _last_rotation_time > timedelta(hours=6):
+#         _force_rotate_api_key()
+
+
+# def _force_rotate_api_key():
+#     """Force rotation immediately."""
+#     global _current_api_key, _last_rotation_time
+#     _current_api_key = next(_td_api_keys)
+#     _last_rotation_time = datetime.now()
+#     print(f"[TwelveData] Rotated API key to: {_current_api_key}")
 
 
 def get_ohlc(symbol: str, timeframe: int = 15, from_date: int = None, to_date: int = time.time()) -> pd.DataFrame:
@@ -62,33 +63,6 @@ def get_ohlc(symbol: str, timeframe: int = 15, from_date: int = None, to_date: i
     except Exception as e:
         print(f"[LiteFinance] OHLC error: {e}")
 
-    # --- 2. Fallback to TwelveData ---
-    try:
-        _rotate_api_key()
-        td_interval = f"{timeframe}min"
-        td_url = (
-            f"https://api.twelvedata.com/time_series?"
-            f"symbol={norm_symbol}&interval={td_interval}&apikey={_current_api_key}"
-        )
-        resp = requests.get(td_url, timeout=15)
-        resp.raise_for_status()
-        td_data = resp.json()
-
-        if "values" in td_data and td_data["values"]:
-            df = pd.DataFrame(td_data["values"])
-            for col in ["open", "high", "low", "close"]:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors="coerce")
-            if "datetime" in df.columns:
-                df["datetime"] = pd.to_datetime(df["datetime"], utc=True)
-            df.sort_values("datetime", inplace=True)
-            df.reset_index(drop=True, inplace=True)
-            return df
-    except Exception as e:
-        print(f"[TwelveData] OHLC error: {e}")
-
-    return pd.DataFrame()
-
 
 def get_price(symbol: str) -> dict | None:
     """
@@ -100,34 +74,25 @@ def get_price(symbol: str) -> dict | None:
 
     # --- 1. Try LiteFinance scrape ---
     try:
-        result = get_last_data(symbol).json()
+        result_raw = get_last_data(symbol)  # this is a string
+        # parse it into a dict
+        if isinstance(result_raw, str):
+            result = json.loads(result_raw)
+        else:
+            result = result_raw
+
         price = result.get("price")
-        if price:
+        bid = result.get("bid")
+        ask = result.get("ask")
+        if price is not None:
             return {
                 "source": "litefinance scraped last data",
                 "symbol": norm_symbol,
-                "price": float(price)
+                "price": float(price),
+                "bid": bid,
+                "ask": ask
             }
         else:
             print(f"[LiteFinance] Script returned no price.")
     except Exception as e:
         print(f"[LiteFinance] Error: {e}")
-
-    # --- 2. Fallback to TwelveData ---
-    try:
-        _rotate_api_key()
-        td_url = f"https://api.twelvedata.com/price?symbol={norm_symbol}&apikey={_current_api_key}"
-        resp = requests.get(td_url, timeout=10)
-        resp.raise_for_status()
-        td_data = resp.json()
-
-        if "price" in td_data:
-            return {
-                "source": "twelvedata",
-                "symbol": norm_symbol,
-                "price": float(td_data["price"])
-            }
-    except Exception as e:
-        print(f"[TwelveData] Error: {e}")
-
-    return None

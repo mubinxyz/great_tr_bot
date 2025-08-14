@@ -14,14 +14,14 @@ import time
 
 
 
-def generate_chart_image(symbol: str, alert_price: float = None, timeframe: str = 15, from_date: int = None, to_date: int = time.time(), outputsize: int = 200):
+def generate_chart_image(symbol: str, alert_price: float = None, timeframe: str = "15", from_date: int = None, to_date: int = time.time(), outputsize: int = 200):
     """
     Generate PNG chart for `symbol` at `interval` (interval can be '1h', '15m', '1440', etc).
     Returns: (BytesIO, period_minutes)
       - BytesIO is a PNG image buffer.
       - period_minutes is the integer minutes used with LiteFinance (e.g. 60 for '1h').
     """
-    
+    symbol = symbol.upper()
 
     timeframe_normalized = normalize_timeframe(timeframe)  # minute-based period for LiteFinance
     from_date_normalized = to_unix_timestamp(from_date)
@@ -29,7 +29,13 @@ def generate_chart_image(symbol: str, alert_price: float = None, timeframe: str 
 
     # --- fetch OHLC using new DataService ---
     try:
-        raw = get_ohlc(symbol, timeframe_normalized, from_date_normalized, to_date_normalized)
+        raw = get_ohlc(
+            symbol,
+            timeframe_normalized,
+            from_date_normalized,
+            to_date_normalized,
+            # outputsize=outputsize  # <-- now used to limit candles
+        )
     except Exception as e:
         raise RuntimeError(f"Failed to fetch OHLC: {e}")
 
@@ -152,4 +158,4 @@ def generate_chart_image(symbol: str, alert_price: float = None, timeframe: str 
     mpf.plot(**plot_kwargs)
     plt.close("all")
     buf.seek(0)
-    return buf, period_minutes
+    return buf, timeframe_normalized

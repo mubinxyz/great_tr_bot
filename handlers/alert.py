@@ -3,7 +3,9 @@ import asyncio
 from telegram.ext import CommandHandler
 from services.user_service import get_or_create_user
 from services.alert_service import create_alert
-from utils.chart_utils import normalize_interval, generate_chart_image
+from utils.chart_utils import generate_chart_image
+from utils.normalize_data import normalize_timeframe
+
 
 async def alert_command(update, context):
     """
@@ -30,7 +32,7 @@ async def alert_command(update, context):
     normalized_tfs = []
     for tf in timeframes:
         try:
-            normalized_tfs.append(normalize_interval(tf))
+            normalized_tfs.append(normalize_timeframe(tf))
         except ValueError as e:
             await update.message.reply_text(str(e))
             return
