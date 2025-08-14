@@ -1,18 +1,19 @@
 # services/alert_service.py
-
 from datetime import datetime
 from typing import Optional, Union
+import logging
+
 from models.alert import Alert, AlertDirection
 from services.db_service import get_db
 from utils.normalize_data import normalize_symbol
-from utils.get_data import DataService
+from utils.get_data import get_price  # use top-level function
 
-data_service = DataService()
+logger = logging.getLogger(__name__)
 
-
+# --- helpers ---
 def _extract_price(price_resp: Union[dict, float, int, None]) -> Optional[float]:
     """
-    Normalize DataService.get_price output into a float price or None.
+    Normalize get_price output into a float price or None.
     Accepts:
       - dict with 'price' (or 'last', 'close', 'ask', 'bid')
       - plain numeric (float/int)
@@ -21,14 +22,13 @@ def _extract_price(price_resp: Union[dict, float, int, None]) -> Optional[float]
     if price_resp is None:
         return None
     if isinstance(price_resp, dict):
-        # common keys to check, in order of preference
         for key in ("price", "last", "close", "ask", "bid", "last_price"):
             if key in price_resp and price_resp[key] is not None:
                 try:
                     return float(price_resp[key])
                 except (ValueError, TypeError):
                     continue
-        # if dictionary contains a single numeric-like value, try to find it
+        # fallback: try any numeric-like value
         for v in price_resp.values():
             try:
                 return float(v)
@@ -46,32 +46,37 @@ def create_alert(user_id: int, symbol: str, target_price: Union[float, str], tim
     """
     Create an alert and determine direction by comparing current market price.
     Returns the created Alert instance (SQLAlchemy object).
-
-    timeframes may be a list (e.g. ['1h','4h']) or a comma-separated string.
+    timeframes may be a list (e.g. ['1','60']) or a comma-separated string.
     """
-    # normalize timeframes into comma-separated string
+    # Normalize timeframes into comma-separated string
     if isinstance(timeframes, list):
         tf_str = ",".join([str(tf).strip() for tf in timeframes if str(tf).strip()])
     else:
         tf_str = str(timeframes or "").strip()
 
-    # coerce target_price to float
+    # coerce target_price
     try:
         target_price = float(target_price)
     except Exception as e:
         raise ValueError(f"Invalid target_price: {target_price}") from e
 
-    # Get current market price from DataService
+    # Normalize symbol early and use normalized form for price fetching & storage
     try:
-        price_info = data_service.get_price(symbol)
+        normalized_symbol = normalize_symbol(symbol)
+    except Exception:
+        normalized_symbol = str(symbol).upper()
+
+    # Get current market price
+    try:
+        price_info = get_price(normalized_symbol)
+        logger.debug("get_price(%s) -> %s", normalized_symbol, price_info)
         current_price = _extract_price(price_info)
         if current_price is None:
-            raise RuntimeError(f"Failed to parse current price for {symbol} (response: {price_info})")
+            raise RuntimeError(f"Failed to parse current price for {normalized_symbol} (response: {price_info})")
     except Exception as e:
-        raise RuntimeError(f"Failed to fetch price for {symbol}: {e}") from e
+        raise RuntimeError(f"Failed to fetch price for {normalized_symbol}: {e}") from e
 
     # Determine direction and trigger status
-    # If the target is greater than current price -> user waiting for price to go ABOVE target
     if target_price > current_price:
         direction = AlertDirection.ABOVE
         triggered = False
@@ -80,18 +85,13 @@ def create_alert(user_id: int, symbol: str, target_price: Union[float, str], tim
         direction = AlertDirection.BELOW
         triggered = False
         triggered_at = None
-    else:  # target exactly matches current price -> treat as triggered now
+    else:
+        # equal -> treat as triggered now
         direction = AlertDirection.ABOVE
         triggered = True
         triggered_at = datetime.utcnow()
 
-    # Normalize symbol string
-    try:
-        normalized_symbol = normalize_symbol(symbol)
-    except Exception:
-        normalized_symbol = str(symbol).upper()
-
-    # Persist to DB
+    # Persist
     with get_db() as db:
         alert = Alert(
             user_id=user_id,
@@ -109,17 +109,13 @@ def create_alert(user_id: int, symbol: str, target_price: Union[float, str], tim
 
 
 def get_pending_alerts():
-    """
-    Returns all alerts that have not yet been triggered.
-    """
+    """Return all alerts that have not yet been triggered."""
     with get_db() as db:
         return db.query(Alert).filter_by(triggered=False).all()
 
 
 def mark_alert_triggered(alert_id: int):
-    """
-    Marks a given alert as triggered and sets triggered_at timestamp.
-    """
+    """Mark alert as triggered and set timestamp."""
     with get_db() as db:
         alert = db.query(Alert).filter_by(id=alert_id).first()
         if not alert:

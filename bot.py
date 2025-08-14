@@ -1,9 +1,9 @@
 import logging
 from telegram.ext import Application
 from config import BOT_TOKEN, LOG_LEVEL
-from handlers import start, help, price, chart
+from handlers import start, help, price, chart, alert
 from services.db_service import init_db
-# from utils.alert_checker import check_alerts_job
+from utils.alert_checker import check_alerts_job
 from handlers.listalerts import list_alerts_handler, delete_alert_handler
 # from handlers.backtest import register_backtest_handlers
 
@@ -26,13 +26,13 @@ def main():
     application.add_handler(help.handler)
     application.add_handler(price.handler)
     application.add_handler(chart.handler)
-    # application.add_handler(alert.handler)
+    application.add_handler(alert.handler)
     application.add_handler(list_alerts_handler)
     application.add_handler(delete_alert_handler)
     # register_backtest_handlers(application)
 
     # Add background job every 30 seconds
-    # application.job_queue.run_repeating(check_alerts_job, interval=30, first=5)
+    application.job_queue.run_repeating(check_alerts_job, interval=3, first=4)
 
     # Start polling
     logger.info("Bot is starting...")

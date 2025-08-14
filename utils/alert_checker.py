@@ -1,12 +1,13 @@
 # utils/alert_checker.py
 import asyncio
+import functools
+import logging
 from utils.chart_utils import generate_chart_image
-from utils.scrape_last_data import get_last_data
+from utils.get_data import get_price
 from services.alert_service import get_pending_alerts, mark_alert_triggered
 from models.alert import AlertDirection
 
-# unified data service (used for price lookups and OHLC)
-
+logger = logging.getLogger(__name__)
 
 
 def _extract_price(price_resp):
@@ -19,21 +20,24 @@ def _extract_price(price_resp):
     """
     if price_resp is None:
         return None
+
     if isinstance(price_resp, dict):
-        # common keys: 'price', maybe 'last'
-        if "price" in price_resp and price_resp["price"] is not None:
-            return float(price_resp["price"])
-        if "last" in price_resp and price_resp["last"] is not None:
-            return float(price_resp["last"])
-        # try any numeric-looking value
-        for k in ("close", "ask", "bid", "last_price"):
-            if k in price_resp and price_resp[k] is not None:
+        # check common keys first
+        for key in ("price", "last", "close", "ask", "bid", "last_price"):
+            if key in price_resp and price_resp[key] is not None:
                 try:
-                    return float(price_resp[k])
-                except Exception:
-                    pass
+                    return float(price_resp[key])
+                except (ValueError, TypeError):
+                    continue
+        # fallback: scan values for numeric-like
+        for v in price_resp.values():
+            try:
+                return float(v)
+            except Exception:
+                continue
         return None
-    # numeric-like response
+
+    # numeric-like
     try:
         return float(price_resp)
     except Exception:
@@ -43,83 +47,111 @@ def _extract_price(price_resp):
 async def check_alerts_job(context):
     """
     Periodic job: checks pending alerts and triggers if conditions are met.
-    Meant to be scheduled in the bot JobQueue (e.g. every 30 seconds).
+    Intended to be scheduled in bot job queue (e.g. every 30s).
     """
-    alerts = get_pending_alerts()
+    try:
+        alerts = get_pending_alerts()
+    except Exception as e:
+        logger.exception("Failed to load pending alerts: %s", e)
+        return
+
     if not alerts:
-        return  # nothing to do
+        return
+
+    loop = asyncio.get_running_loop()
 
     for alert in alerts:
         try:
-            # get_price may return a dict or a plain number
-            price_resp = get_last_data(alert.symbol)
-            current_price = _extract_price(price_resp)
-
-            if current_price is None:
-                # couldn't determine price, skip this alert for now
-                print(f"[AlertChecker] Could not fetch price for {alert.symbol}; skipping alert {alert.id}")
+            # 1) fetch current price in executor (get_price is blocking)
+            try:
+                price_resp = await loop.run_in_executor(None, functools.partial(get_price, alert.symbol))
+            except Exception as e:
+                logger.warning("[AlertChecker] Price fetch failed for %s (alert %s): %s", alert.symbol, getattr(alert, "id", "?"), e)
                 continue
 
-            # Compare according to alert direction
+            current_price = _extract_price(price_resp)
+            if current_price is None:
+                logger.warning("[AlertChecker] Could not parse price for %s (alert %s); skipping", alert.symbol, getattr(alert, "id", "?"))
+                continue
+
+            # 2) evaluate trigger condition based on direction
             triggered_now = False
-            if alert.direction == AlertDirection.ABOVE and current_price >= float(alert.target_price):
-                triggered_now = True
-            elif alert.direction == AlertDirection.BELOW and current_price <= float(alert.target_price):
-                triggered_now = True
+            try:
+                if alert.direction == AlertDirection.ABOVE and current_price >= float(alert.target_price):
+                    triggered_now = True
+                elif alert.direction == AlertDirection.BELOW and current_price <= float(alert.target_price):
+                    triggered_now = True
+            except Exception as e:
+                logger.exception("[AlertChecker] Error comparing prices for alert %s: %s", getattr(alert, "id", "?"), e)
+                continue
 
-            if triggered_now:
-                # Mark as triggered
-                mark_alert_triggered(alert.id)
+            if not triggered_now:
+                continue
 
-                # Notify user
-                # alert.user should be available (relationship); fall back to user_id if not
-                chat_id = getattr(getattr(alert, "user", None), "chat_id", None) or getattr(alert, "user_id", None)
-                msg_text = (
-                    f"📢 Price Alert Triggered!\n"
-                    f"{alert.symbol} is now {alert.direction.value} {alert.target_price}\n"
-                    f"Current Price: {current_price}"
-                )
+            # 3) mark alert triggered in DB (blocking -> executor)
+            try:
+                updated_alert = await loop.run_in_executor(None, functools.partial(mark_alert_triggered, alert.id))
+            except Exception as e:
+                logger.exception("[AlertChecker] Failed to mark alert %s as triggered: %s", getattr(alert, "id", "?"), e)
+                # still attempt to notify user (best-effort) below
+                updated_alert = alert
+
+            # 4) notify user
+            # Resolve chat id: prefer related user.chat_id if relationship exists; otherwise use user_id
+            user_obj = getattr(updated_alert, "user", None)
+            chat_id = None
+            if user_obj is not None:
+                chat_id = getattr(user_obj, "chat_id", None)
+            if not chat_id:
+                chat_id = getattr(updated_alert, "user_id", None)
+
+            msg_text = (
+                f"📢 Price Alert Triggered!\n"
+                f"{updated_alert.symbol} is now {updated_alert.direction.value} {updated_alert.target_price}\n"
+                f"Current Price: {current_price}"
+            )
+
+            try:
+                await context.bot.send_message(chat_id=chat_id, text=msg_text)
+            except Exception as e:
+                logger.exception("[AlertChecker] Failed to send trigger message for alert %s to %s: %s", getattr(updated_alert, "id", "?"), chat_id, e)
+
+            # 5) send charts for all timeframes in alert (blocking plotting -> executor)
+            tfs = str(updated_alert.timeframes or "").split(",")
+            for tf in tfs:
+                tf = tf.strip()
+                if not tf:
+                    continue
                 try:
-                    await context.bot.send_message(chat_id=chat_id, text=msg_text)
-                except Exception as e:
-                    print(f"[AlertChecker] Failed to send trigger message for alert {alert.id} to {chat_id}: {e}")
+                    call_plot = functools.partial(
+                        generate_chart_image,
+                        symbol=updated_alert.symbol,
+                        alert_price=updated_alert.target_price,
+                        timeframe=tf,
+                        from_date=None,
+                        to_date=None,
+                        outputsize=None
+                    )
+                    buf, interval_minutes = await loop.run_in_executor(None, call_plot)
 
-                # Send charts for all timeframes in the alert (run blocking generator in executor)
-                for tf in str(alert.timeframes).split(","):
-                    tf = tf.strip()
-                    if not tf:
-                        continue
+                    # ensure buffer is rewound
                     try:
-                        loop = asyncio.get_running_loop()
-                        # generate_chart_image is blocking; run in threadpool
-                        buf, interval_minutes = await loop.run_in_executor(
-                            None,
-                            generate_chart_image,
-                            alert.symbol,
-                            tf,
-                            alert.target_price,  # alert_price
-                            None  # outputsize -> let generate_chart_image use its default
-                        )
+                        buf.seek(0)
+                    except Exception:
+                        pass
 
-                        # send the photo (BytesIO buffer)
-                        await context.bot.send_photo(
-                            chat_id=chat_id,
-                            photo=buf,
-                            filename=f"{alert.symbol}_{interval_minutes}.png",
-                            caption=f"⏱ Timeframe: {interval_minutes} minutes, Symbol: {alert.symbol}"
-                        )
-
-                    except Exception as e:
-                        # notify user that chart generation failed for this timeframe
-                        try:
-                            await context.bot.send_message(
-                                chat_id=chat_id,
-                                text=f"⚠️ Could not generate chart for {alert.symbol} {tf}: {e}"
-                            )
-                        except Exception:
-                            # best-effort only
-                            print(f"[AlertChecker] Could not send error message for alert {alert.id}: {e}")
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=buf,
+                        filename=f"{updated_alert.symbol}_{interval_minutes}.png",
+                        caption=f"⏱ Timeframe: {interval_minutes}, Symbol: {updated_alert.symbol}"
+                    )
+                except Exception as e:
+                    logger.exception("[AlertChecker] Failed to generate/send chart for alert %s tf=%s: %s", getattr(updated_alert, "id", "?"), tf, e)
+                    try:
+                        await context.bot.send_message(chat_id=chat_id, text=f"⚠️ Could not generate chart for {updated_alert.symbol} {tf}: {e}")
+                    except Exception:
+                        logger.exception("[AlertChecker] Also failed to notify user about chart generation error for alert %s", getattr(updated_alert, "id", "?"))
 
         except Exception as e:
-            # top-level error for this alert; continue to next alert
-            print(f"[AlertChecker] Error checking alert {getattr(alert, 'id', '?')}: {e}")
+            logger.exception("[AlertChecker] Unexpected error when processing alert %s: %s", getattr(alert, "id", "?"), e)
