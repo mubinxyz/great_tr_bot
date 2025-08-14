@@ -78,3 +78,46 @@ def normalize_ohlc(ohlc_data: dict) -> pd.DataFrame:
     df.reset_index(drop=True, inplace=True)
 
     return df
+
+
+import pandas as pd
+from datetime import datetime
+
+def to_unix_timestamp(time_input) -> int:
+    """
+    Convert almost any date/time input to a Unix timestamp (in seconds).
+    
+    Accepts:
+        - datetime object
+        - date string (many formats, e.g., "2024-08-01 14:30:00", "08/01/2024", "1 Aug 2024 2:30 PM")
+        - pandas Timestamp
+        - Unix timestamp in milliseconds or seconds
+        - ISO format strings
+        
+    Returns:
+        int: Unix timestamp in seconds
+    """
+    # If it's already a datetime object
+    if isinstance(time_input, datetime):
+        return int(time_input.timestamp())
+    
+    # If it's already a pandas Timestamp
+    if isinstance(time_input, pd.Timestamp):
+        return int(time_input.timestamp())
+    
+    # If it's a number (seconds or milliseconds)
+    if isinstance(time_input, (int, float)):
+        # Detect milliseconds (larger than year 3000 in seconds)
+        if time_input > 1e12:  # milliseconds
+            return int(time_input / 1000)
+        return int(time_input)  # already seconds
+    
+    # Try parsing as a string
+    if isinstance(time_input, str):
+        try:
+            ts = pd.to_datetime(time_input, utc=True)
+            return int(ts.timestamp())
+        except Exception:
+            raise ValueError(f"Unrecognized date/time format: {time_input}")
+    
+    raise TypeError(f"Unsupported type: {type(time_input)}")

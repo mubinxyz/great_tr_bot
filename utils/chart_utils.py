@@ -7,57 +7,29 @@ import numpy as np
 import pandas as pd
 import mplfinance as mpf
 import matplotlib.pyplot as plt
-from utils.get_data import DataService  # uses DataService.get_ohlc
-
-DEFAULT_OUTPUTSIZE = 200
-data_service = DataService()  # use your unified DataService
-
-
-def normalize_interval(tf: str) -> int:
-    """
-    Normalize a timeframe string into LiteFinance period in minutes.
-    Accepts strings like "1", "1m", "1min", "1h", "1d", "1w", etc., or ints.
-    """
-    tf = str(tf).lower().strip()
-    mapping = {
-        "1": 1, "1m": 1, "1min": 1,
-        "5": 5, "5m": 5, "5min": 5,
-        "15": 15, "15m": 15, "15min": 15,
-        "30": 30, "30m": 30, "30min": 30,
-        "45": 45, "45m": 45, "45min": 45,
-        "1h": 60, "60": 60,
-        "2h": 120, "120": 120,
-        "3h": 180, "180": 180,
-        "4h": 240, "240": 240,
-        "6h": 360, "360": 360,
-        "8h": 480, "480": 480,
-        "1d": 1440, "day": 1440, "1day": 1440,
-        "1w": 10080, "1week": 10080,
-        "1mo": 43200, "month": 43200, "1month": 43200,
-    }
-    if tf in mapping:
-        return mapping[tf]
-    try:
-        return int(tf)
-    except ValueError:
-        raise ValueError(f"Invalid timeframe: {tf}")
+from utils.get_data import get_ohlc   
+from utils.normalize_data import normalize_timeframe, to_unix_timestamp
+import time
 
 
-def generate_chart_image(symbol: str, interval: str, alert_price: float = None, outputsize: int = None):
+
+
+def generate_chart_image(symbol: str, alert_price: float = None, timeframe: str = 15, from_date: int = None, to_date: int = time.time(), outputsize: int = 200):
     """
     Generate PNG chart for `symbol` at `interval` (interval can be '1h', '15m', '1440', etc).
     Returns: (BytesIO, period_minutes)
       - BytesIO is a PNG image buffer.
       - period_minutes is the integer minutes used with LiteFinance (e.g. 60 for '1h').
     """
-    if outputsize is None:
-        outputsize = DEFAULT_OUTPUTSIZE
+    
 
-    period_minutes = normalize_interval(interval)  # minute-based period for LiteFinance
+    timeframe_normalized = normalize_timeframe(timeframe)  # minute-based period for LiteFinance
+    from_date_normalized = to_unix_timestamp(from_date)
+    to_date_normalized = to_unix_timestamp(to_date)
 
     # --- fetch OHLC using new DataService ---
     try:
-        raw = data_service.get_ohlc(symbol, period_minutes, outputsize=outputsize)
+        raw = get_ohlc(symbol, timeframe_normalized, from_date_normalized, to_date_normalized)
     except Exception as e:
         raise RuntimeError(f"Failed to fetch OHLC: {e}")
 
