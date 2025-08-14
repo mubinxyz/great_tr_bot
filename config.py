@@ -18,21 +18,3 @@ except ValueError:
 
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").rstrip("/")
 PORT = int(os.environ.get("PORT", 8000))
-
-<<<<<<< HEAD
-# TwelveData API Keys (remove None values)
-
-
-# ===== Validations =====
-# if not BOT_TOKEN:
-#     raise ValueError("BOT_TOKEN is missing in .env file!")
-# if not TD_API_KEYS:
-#     raise ValueError("At least one TwelveData API key must be set in .env!")
-=======
-# SECRET_TOKEN for Telegram webhook verification (recommended)
-SECRET_TOKEN = os.environ.get("SECRET_TOKEN", "")
-
-# Optional: TwelveData keys (leave blank or set envs individually)
-TD_API_KEY_1 = os.environ.get("TD_API_KEY_1", "")
-# ... add other keys as needed
->>>>>>> bcaf71997d2e1da064187f918f80e55ac945132f
