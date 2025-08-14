@@ -52,10 +52,10 @@ def get_last_data(symbol: str = "EURUSD"):
         session.close()
 
 # Main loop
-end_time = time.time() + 15
+# end_time = time.time() + 15
 
-while time.time() < end_time:
-    result = get_last_data()
-    if result:
-        print(result)
-    # time.sleep()  # Increased sleep to avoid rate-limiting
+# while time.time() < end_time:
+#     result = get_last_data()
+#     if result:
+#         print(result)
+#     # time.sleep()  # Increased sleep to avoid rate-limiting

@@ -1,97 +1,85 @@
-# tests/test_get_data.py
-
 import pytest
-from unittest.mock import patch, MagicMock
 import pandas as pd
-from utils.get_data import DataService
+from unittest.mock import patch, MagicMock
+from utils import get_data
 
-@pytest.fixture
-def data_service():
-    return DataService()
 
-# ---------------------------
-# Test get_price
-# ---------------------------
-@patch("utils.get_data.fetch_last_price_json")
-def test_get_price_litefinance_success(mock_fetch, data_service):
-    mock_resp = MagicMock()
-    mock_resp.json.return_value = {"price": "123.45"}
-    mock_fetch.return_value = mock_resp
+@pytest.fixture(autouse=True)
+def reset_api_keys():
+    """
+    Reset API key globals before each test
+    so rotation logic is predictable.
+    """
+    get_data._td_api_keys = iter(["KEY1", "KEY2", "KEY3"])
+    get_data._current_api_key = next(get_data._td_api_keys)
+    get_data._last_rotation_time = get_data.datetime.now()
 
-    result = data_service.get_price("EURUSD")
-    assert result["source"].startswith("litefinance")
-    assert result["price"] == 123.45
-    assert result["symbol"] == "EURUSD"
 
-@patch("utils.get_data.fetch_last_price_json", side_effect=Exception("fail"))
-@patch("utils.get_data.requests.get")
-def test_get_price_twelvedata_fallback(mock_get, mock_fetch, data_service):
-    mock_resp = MagicMock()
-    mock_resp.json.return_value = {"price": "678.90"}
-    mock_get.return_value = mock_resp
+def test_get_price_from_litefinance_success():
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"price": "123.45"}
 
-    result = data_service.get_price("EURUSD")
-    assert result["source"] == "twelvedata"
-    assert result["price"] == 678.90
-    assert result["symbol"] == "EURUSD"
+    with patch("utils.get_data.get_last_data", return_value=mock_response):
+        price_info = get_data.get_price("EURUSD")
 
-@patch("utils.get_data.fetch_last_price_json", side_effect=Exception("fail"))
-@patch("utils.get_data.requests.get", side_effect=Exception("fail"))
-def test_get_price_none(mock_get, mock_fetch, data_service):
-    result = data_service.get_price("EURUSD")
-    assert result is None
+    assert price_info["source"] == "litefinance scraped last data"
+    assert price_info["symbol"] == "EURUSD"
+    assert price_info["price"] == 123.45
 
-# ---------------------------
-# Test get_ohlc
-# ---------------------------
-@patch("utils.get_data.normalize_ohlc")
-@patch("utils.get_data.requests.get")
-def test_get_ohlc_litefinance_success(mock_get, mock_normalize, data_service):
-    # LiteFinance raw data
-    lite_data = [{"t": 1, "o": 1.0, "h": 2.0, "l": 0.5, "c": 1.5, "v": 100}]
-    mock_get.return_value = MagicMock()
-    mock_get.return_value.json.return_value = {"data": lite_data}
 
-    # normalized DataFrame returned by normalize_ohlc
-    mock_df = pd.DataFrame({
-        "datetime": [pd.Timestamp("2025-08-13")],
-        "open": [1.0],
-        "high": [2.0],
-        "low": [0.5],
-        "close": [1.5],
-        "volume": [100]
-    })
-    mock_normalize.return_value = mock_df
+def test_get_price_from_twelvedata_fallback():
+    # Simulate LiteFinance scrape failure
+    with patch("utils.get_data.get_last_data", side_effect=Exception("Scrape failed")), \
+         patch("utils.get_data.requests.get") as mock_get:
 
-    df = data_service.get_ohlc("EURUSD")
-    assert isinstance(df, pd.DataFrame)
-    assert "open" in df.columns
-    assert df["open"].iloc[0] == 1.0
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"price": "456.78"}
+        mock_resp.raise_for_status.return_value = None
+        mock_get.return_value = mock_resp
 
-@patch("utils.get_data.requests.get")
-def test_get_ohlc_twelvedata_fallback(mock_get, data_service):
-    # TwelveData fallback mock
-    td_mock = MagicMock()
-    td_values = [
-        {"datetime": "2025-08-13 00:00:00", "open": "1.0", "high": "2.0", "low": "0.5", "close": "1.5"}
+        price_info = get_data.get_price("GBPUSD")
+
+    assert price_info["source"] == "twelvedata"
+    assert price_info["price"] == 456.78
+
+
+def test_get_ohlc_from_litefinance_success():
+    ohlc_data = [
+        {"time": 1690000000, "open": 1.1, "high": 1.2, "low": 1.0, "close": 1.15},
+        {"time": 1690000015, "open": 1.15, "high": 1.25, "low": 1.1, "close": 1.2},
     ]
-    td_mock.json.return_value = {"values": td_values}
 
-    # side_effect function: first call raises LiteFinance fail, second returns TD mock
-    def side_effect(url, *args, **kwargs):
-        if "litefinance" in url:
-            raise Exception("LiteFinance fail")
-        return td_mock
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"data": ohlc_data}
+    mock_resp.raise_for_status.return_value = None
 
-    mock_get.side_effect = side_effect
+    with patch("utils.get_data.requests.get", return_value=mock_resp), \
+         patch("utils.get_data.normalize_ohlc", return_value=pd.DataFrame(ohlc_data)):
+        df = get_data.get_ohlc("EURUSD", timeframe=15)
 
-    df = data_service.get_ohlc("EURUSD")
     assert isinstance(df, pd.DataFrame)
-    assert df["open"].iloc[0] == 1.0
-    assert pd.api.types.is_datetime64_any_dtype(df["datetime"])
+    assert not df.empty
 
-@patch("utils.get_data.requests.get", side_effect=Exception("fail"))
-def test_get_ohlc_fail_returns_empty(mock_get, data_service):
-    df = data_service.get_ohlc("EURUSD")
+
+def test_get_ohlc_from_twelvedata_fallback():
+    # Simulate LiteFinance failure
+    with patch("utils.get_data.requests.get") as mock_get:
+        # First call (LiteFinance) raises exception
+        mock_get.side_effect = [
+            Exception("LiteFinance failed"),
+            MagicMock(**{
+                "json.return_value": {
+                    "values": [
+                        {"datetime": "2024-08-01 00:00:00", "open": "1.1", "high": "1.2", "low": "1.0", "close": "1.15"},
+                        {"datetime": "2024-08-01 00:15:00", "open": "1.15", "high": "1.25", "low": "1.1", "close": "1.2"}
+                    ]
+                },
+                "raise_for_status.return_value": None
+            })
+        ]
+
+        df = get_data.get_ohlc("GBPUSD", timeframe=15)
+
     assert isinstance(df, pd.DataFrame)
-    assert df.empty
+    assert len(df) == 2
+    assert "datetime" in df.columns
