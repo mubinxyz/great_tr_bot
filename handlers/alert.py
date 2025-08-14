@@ -10,7 +10,7 @@ from services.chart_service import get_chart
 from utils.normalize_data import normalize_timeframe, normalize_symbol
 
 logger = logging.getLogger(__name__)
-INTER_CHART_DELAY = 0.15  # polite pause between charts
+INTER_CHART_DELAY = 0.1  # polite pause between charts
 
 
 async def alert_command(update: Update, context):
