@@ -34,7 +34,7 @@ def main():
     # register_backtest_handlers(application)
 
     # Add background job every 30 seconds
-    application.job_queue.run_repeating(check_alerts_job, interval=9, first=4)
+    application.job_queue.run_repeating(check_alerts_job, interval=10, first=4)
 
     # Start polling
     logger.info("Bot is starting...")

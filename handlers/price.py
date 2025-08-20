@@ -1,3 +1,4 @@
+# handlers/price.py
 from telegram import Update
 from telegram.ext import CommandHandler, ContextTypes
 from utils.get_data import get_price
@@ -21,22 +22,29 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ Could not fetch price for '{user_input.upper()}'. Try again later.")
             return
 
-        # safe to access dict now
-        price = last_data.get("price")
-        bid = last_data.get("bid")
-        ask = last_data.get("ask")
-
-        # format output nicely
-        if price is not None:
+        # normalize values
+        def _fmt(val):
+            if val is None:
+                return "N/A"
             try:
-                price_str = f"{float(price):.6f}"  # adjust precision as you like
+                return f"{float(val):.6f}"
             except Exception:
-                price_str = str(price)
-        else:
-            price_str = "N/A"
+                return str(val)
 
-        bid_str = str(bid) if bid is not None else "N/A"
-        ask_str = str(ask) if ask is not None else "N/A"
+        # get common keys if dict
+        if isinstance(last_data, dict):
+            price = last_data.get("price") or last_data.get("last") or last_data.get("close") or last_data.get("last_price")
+            bid = last_data.get("bid")
+            ask = last_data.get("ask")
+        else:
+            # numeric-like
+            price = last_data
+            bid = None
+            ask = None
+
+        price_str = _fmt(price)
+        bid_str = _fmt(bid)
+        ask_str = _fmt(ask)
 
         await update.message.reply_text(
             f"💹 Price for {user_input.upper()}:\n"
