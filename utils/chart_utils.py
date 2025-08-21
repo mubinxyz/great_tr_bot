@@ -3,15 +3,14 @@ import matplotlib
 matplotlib.use("Agg")
 
 from io import BytesIO
+import re
 import numpy as np
 import pandas as pd
 import mplfinance as mpf
 import matplotlib.pyplot as plt
-from utils.get_data import get_ohlc   
+from utils.get_data import get_ohlc
 from utils.normalize_data import normalize_timeframe, to_unix_timestamp
 import time
-
-
 
 
 def generate_chart_image(symbol: str, alert_price: float = None, timeframe: str = "15", from_date: int = None, to_date: int = time.time(), outputsize: int = 200):
@@ -95,18 +94,39 @@ def generate_chart_image(symbol: str, alert_price: float = None, timeframe: str 
             )
         )
 
-    # Compute day-first vertical lines
-    day_firsts = []
+    # Determine whether to draw daily separators based on the user's rules:
+    # - always show for timeframe 1 or 5
+    # - for timeframe 15 or 60 (1h), show only when outputsize < 151
+    # - never for other timeframes
+    draw_daily_separators = False
+    tf_digits = None
     try:
-        # group by calendar date, take first timestamp of each day
-        day_firsts_series = df.index.to_series().groupby(df.index.date).first()
-        idx_min, idx_max = df.index[0], df.index[-1]
-        day_firsts = [d for d in day_firsts_series if idx_min < d <= idx_max]
+        m = re.search(r"(\d+)", str(timeframe))
+        if m:
+            tf_digits = m.group(1)
     except Exception:
-        day_firsts = []
+        tf_digits = None
+
+    if tf_digits in {"1", "5"}:
+        draw_daily_separators = True
+    elif tf_digits in {"15", "60"} and isinstance(outputsize, int) and outputsize < 151:
+        draw_daily_separators = True
+    else:
+        draw_daily_separators = False
+
+    # Compute day-first vertical lines only if allowed by the above logic
+    day_firsts = []
+    if draw_daily_separators:
+        try:
+            # group by calendar date, take first timestamp of each day
+            day_firsts_series = df.index.to_series().groupby(df.index.date).first()
+            idx_min, idx_max = df.index[0], df.index[-1]
+            day_firsts = [d for d in day_firsts_series if idx_min < d <= idx_max]
+        except Exception:
+            day_firsts = []
 
     alines_dict = None
-    if day_firsts:
+    if draw_daily_separators and day_firsts:
         y_min = float(df["low"].min())
         y_max = float(df["high"].max())
         if alert_price is not None:

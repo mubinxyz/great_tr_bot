@@ -3,3 +3,5 @@
 __pycache__
 .pytest_cache
 great_tr_bot.rar
+database.db
+t.py
