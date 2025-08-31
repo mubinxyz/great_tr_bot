@@ -1,4 +1,4 @@
-````markdown
+
 # 📈 Great TR Bot
 
 A **Telegram trading assistant bot** that helps you quickly fetch market data, charts, and manage price alerts — all from within Telegram.  
@@ -12,7 +12,6 @@ Supports multiple symbols, custom timeframes, and chart visualizations.
   Get the latest Price / BID / ASK for any symbol.  
   ```bash
   /price eurusd
-````
 
 * **Charts on Demand**
   Request charts for one or multiple symbols, with flexible timeframes, output size, or date ranges.
@@ -140,5 +139,3 @@ Pull requests are welcome! For major changes, please open an issue first to disc
 ## 📜 License
 
 MIT © 2025 [mubinxyz](https://github.com/mubinxyz)
-
-```
