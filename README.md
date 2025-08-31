@@ -72,7 +72,7 @@ pip install -r requirements.txt
 ### 4. Run the bot
 
 ```bash
-python main.py
+python bot.py
 ```
 
 Now open your bot in Telegram and start with `/start`.
