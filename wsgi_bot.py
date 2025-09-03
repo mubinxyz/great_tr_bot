@@ -1,5 +1,7 @@
+# wsgi_bot.py
 import logging
 import asyncio
+import threading
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application
@@ -20,7 +22,7 @@ logger = logging.getLogger(__name__)
 # ------------------ Initialize DB ------------------
 init_db()
 
-# ------------------ Telegram Application ------------------
+# ------------------ Telegram Application (no start here) ------------------
 application = Application.builder().token(BOT_TOKEN).build()
 
 # Register handlers
@@ -35,15 +37,27 @@ application.add_handler(delete_alert_handler)
 # ------------------ Flask App ------------------
 flask_app = Flask(__name__)
 
+# We'll forward updates to the bot loop (do not await here)
 @flask_app.post(f"/webhook/{BOT_TOKEN}")
-async def webhook():
-    """Telegram will POST updates here"""
+def webhook():
     data = request.get_json(force=True)
     update = Update.de_json(data, application.bot)
-    await application.process_update(update)
+
+    # Submit processing to the bot's event loop (see start_bot below)
+    try:
+        future = asyncio.run_coroutine_threadsafe(application.process_update(update), bot_loop)
+        # optional: attach callback to log exceptions from processing
+        def _done_callback(f):
+            try:
+                f.result()
+            except Exception:
+                logger.exception("Exception while processing update in bot loop")
+        future.add_done_callback(_done_callback)
+    except Exception:
+        logger.exception("Failed to schedule update on bot loop")
     return "ok"
 
-# ------------------ Startup Tasks ------------------
+# ------------------ Startup Tasks (to be executed inside bot loop) ------------------
 async def on_startup():
     """Initialize and start application, set webhook, and schedule jobs"""
     await application.initialize()
@@ -53,12 +67,21 @@ async def on_startup():
     await application.bot.set_webhook(WEBHOOK_URL)
     logger.info("Webhook set to %s", WEBHOOK_URL)
 
-    # Start background jobs
+    # Start background jobs (runs in the bot's job queue)
     application.job_queue.run_repeating(check_alerts_job, interval=10, first=4)
     logger.info("Background jobs scheduled.")
 
-# Ensure startup runs
-asyncio.get_event_loop().run_until_complete(on_startup())
+# ------------------ Run the bot in a dedicated thread + loop ------------------
+bot_loop = asyncio.new_event_loop()
+
+def _start_bot_loop(loop: asyncio.AbstractEventLoop):
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(on_startup())
+    logger.info("Bot loop started and running forever")
+    loop.run_forever()
+
+bot_thread = threading.Thread(target=_start_bot_loop, args=(bot_loop,), daemon=True)
+bot_thread.start()
 
 # ------------------ WSGI Entry Point for Passenger ------------------
 app = flask_app
