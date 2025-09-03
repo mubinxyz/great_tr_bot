@@ -1,20 +1,24 @@
-# config.py
 import os
-import logging
 from dotenv import load_dotenv
 
-# If you use a .env file in dev, this will load it.
+# Load .env file if present
 load_dotenv()
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+# Bot token (required)
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN environment variable is required")
+
+# Database path (default: local SQLite file)
 DB_PATH = os.environ.get("DB_PATH", "database.db")
 
-# LOG_LEVEL: support both numeric and string ("DEBUG"/"INFO")
-_raw_log = os.environ.get("LOG_LEVEL", "INFO")
-try:
-    LOG_LEVEL = int(_raw_log)
-except ValueError:
-    LOG_LEVEL = getattr(logging, _raw_log.upper(), logging.INFO)
+# Logging level (default: INFO)
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").rstrip("/")
-PORT = int(os.environ.get("PORT", 8000))
+# Cloudflared domain (required in production)
+CLOUDFLARED_DOMAIN = os.environ.get("CLOUDFLARED_DOMAIN")
+if not CLOUDFLARED_DOMAIN:
+    raise ValueError("CLOUDFLARED_DOMAIN environment variable is required")
+
+# Construct webhook URL
+WEBHOOK_URL = f"https://{CLOUDFLARED_DOMAIN}/webhook/{BOT_TOKEN}"
