@@ -16,9 +16,9 @@ DB_PATH = os.environ.get("DB_PATH", "database.db")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 
 # Cloudflared domain (required in production)
-CLOUDFLARED_DOMAIN = os.environ.get("CLOUDFLARED_DOMAIN")
-if not CLOUDFLARED_DOMAIN:
-    raise ValueError("CLOUDFLARED_DOMAIN environment variable is required")
+WEBHOOKS_URL = os.environ.get("WEBHOOKS_URL")
+if not WEBHOOKS_URL:
+    raise ValueError("WEBHOOKS_URL environment variable is required")
 
 # Construct webhook URL
-WEBHOOK_URL = f"https://{CLOUDFLARED_DOMAIN}/webhook/{BOT_TOKEN}"
+WEBHOOK_URL = f"https://{WEBHOOKS_URL}/webhook/{BOT_TOKEN}"
