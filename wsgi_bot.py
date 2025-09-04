@@ -37,6 +37,11 @@ application.add_handler(delete_alert_handler)
 # ------------------ Flask App ------------------
 flask_app = Flask(__name__)
 
+@flask_app.get("/health")
+def health():
+    return "ok"
+    
+    
 # We'll forward updates to the bot loop (do not await here)
 @flask_app.post(f"/webhook/{BOT_TOKEN}")
 def webhook():

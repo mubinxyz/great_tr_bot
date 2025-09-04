@@ -1,24 +1,21 @@
+# config.py
 import os
 from dotenv import load_dotenv
 
-# Load .env file if present
+# Load .env if present (harmless if you’re using cPanel env vars instead)
 load_dotenv()
 
-# Bot token (required)
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN environment variable is required")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
-# Database path (default: local SQLite file)
-DB_PATH = os.environ.get("DB_PATH", "database.db")
+# Required:
+BOT_TOKEN = os.environ["BOT_TOKEN"]
 
-# Logging level (default: INFO)
-LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+# Support both names: prefer PUBLIC_HOST, fallback to WEBHOOKS_URL
+PUBLIC_HOST = os.getenv("PUBLIC_HOST") or os.getenv("WEBHOOKS_URL")
+if not PUBLIC_HOST:
+    raise ValueError("You must set either PUBLIC_HOST or WEBHOOKS_URL")
 
-# Cloudflared domain (required in production)
-WEBHOOKS_URL = os.environ.get("WEBHOOKS_URL")
-if not WEBHOOKS_URL:
-    raise ValueError("WEBHOOKS_URL environment variable is required")
+DB_PATH = os.getenv("DB_PATH", "database.db")
 
-# Construct webhook URL
-WEBHOOK_URL = f"https://{WEBHOOKS_URL}/webhook/{BOT_TOKEN}"
+# Final webhook URL for Telegram
+WEBHOOK_URL = f"https://{PUBLIC_HOST}/webhook/{BOT_TOKEN}"
